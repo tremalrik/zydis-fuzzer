@@ -1,2 +1,4 @@
 # zydis-fuzzer
-Fuzz tester for the Zydis disassembly library
+Directed-random fuzz tester for the [Zydis disassembly library](https://github.com/zyantific/zydis).
+
+Takes 1 optional commandline argument, providing a random-seed to use.
