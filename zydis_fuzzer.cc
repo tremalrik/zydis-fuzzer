@@ -20,7 +20,7 @@
 // recorded data for last instruction
 uint8_t instr_buf[16];
 int machine_mode_int;
-const char *machine_mode_str;
+const char* machine_mode_str;
 
 
 // ---------------------------------------------------
@@ -30,11 +30,10 @@ const char *machine_mode_str;
 //  any of these signals are issued.
 // ---------------------------------------------------
 
-void sigabrt_handler( int signal_type )
-    {
+void sigabrt_handler( int signal_type ) {
     int i;
     printf("\n");
-    const char *sigstr;
+    const char* sigstr;
     switch( signal_type ) {
         case SIGABRT: sigstr = "SIGABRT"; break;
         case SIGSEGV: sigstr = "SIGSEGV"; break;
@@ -48,11 +47,10 @@ void sigabrt_handler( int signal_type )
     printf("\n");
     fflush(stdout);
     exit( EXIT_FAILURE );
-    }
+}
 
 
-int install_sigabrt_handler(void)
-    {
+int install_sigabrt_handler(void) {
     struct sigaction sa;
     sigemptyset( &(sa.sa_mask) );
     sa.sa_handler = sigabrt_handler;
@@ -61,7 +59,7 @@ int install_sigabrt_handler(void)
     sigaction( SIGSEGV, &sa, NULL );
     sigaction( SIGBUS,  &sa, NULL );
     return 0;
-    }
+}
 
 
 // ---------------------------------------------------
@@ -75,7 +73,7 @@ int install_sigabrt_handler(void)
 // randomized x86 instruction prefix bytes.
 
 void generate_prefix_bytes(
-    uint8_t *dst,
+    uint8_t* dst,
     int bytecount,
     bool is_64bit ) {
     static const uint8_t prefix_collection[] = {
@@ -133,9 +131,9 @@ void generate_rand_instr(
     generate_prefix_bytes( buf, num_prefixes, is_64bit );
 
     // output a randomized escape sequence
-    uint8_t *bufptr = buf + num_prefixes;
+    uint8_t* bufptr = buf + num_prefixes;
 
-    switch( rand() % 50 ) {
+    switch( rand() % 32 ) {
         case 0: break;  // regular intructions without escapes
         case 1: *bufptr++ = 0x0F; *bufptr++ = 0x0F; break; // 3dnow
         case 2: *bufptr++ = 0x0F; *bufptr++ = 0x38; break; // 0F 38 escape
@@ -178,7 +176,7 @@ void generate_rand_instr(
             *bufptr++ = rv | ((rv & 0x300) ? 0 : 0x78 );
             break;
         }
-        default: { // 23 to 49: XOP sequence
+        default: { // 23 to 31: XOP sequence
             uint32_t rv = rand();
             *bufptr++ = 0x8F;
             *bufptr++ = (rv & ((rv & 0x300) ? 0xE3 : 0xFF)) ^ 8;
@@ -208,12 +206,17 @@ void generate_rand_instr(
 // wrapped version of the Zydis decoder function
 // that records an instruction byte sequence
 // before calling the decoder itself.
-ZyanStatus wrapped_ZydisDecoderDecodeBuffer(
-    const  ZydisDecoder* decoder,
+
+
+ZyanStatus wrapped_ZydisDecoderDecodeFull(
+    const ZydisDecoder* decoder,
     const void* buffer,
     ZyanUSize length,
-    ZydisDecodedInstruction* instruction) {
-
+    ZydisDecodedInstruction* instruction,
+    ZydisDecodedOperand* operands,
+    ZyanU8 operand_count,
+    ZydisDecodingFlags flags) {
+        
     memcpy( instr_buf, buffer, 16 );
     machine_mode_int = decoder->machine_mode;
     switch( machine_mode_int ) {
@@ -223,12 +226,18 @@ ZyanStatus wrapped_ZydisDecoderDecodeBuffer(
         case ZYDIS_MACHINE_MODE_REAL_16:   machine_mode_str = "real16";      break;
         default:                           machine_mode_str = "(n/a)";       break;
     }
-    return ZydisDecoderDecodeBuffer(
+    return ZydisDecoderDecodeFull(
         decoder,
         buffer,
         length,
-        instruction );
+        instruction,
+        operands,
+        operand_count,
+        flags
+        );
 }
+
+
 
 
 
@@ -252,17 +261,14 @@ int main( int argc, char *argv[] ) {
     ZydisDecoder decoder_x86_64_intel; // x86-64 with Intel branch behavior
     ZydisDecoder decoder_x86_64_amd;   // x86-64 with AMD branch behavior
 
-    ZydisDecoderInit( &decoder_x86_16,       ZYDIS_MACHINE_MODE_LEGACY_16, ZYDIS_ADDRESS_WIDTH_16 );
-    ZydisDecoderInit( &decoder_x86_32,       ZYDIS_MACHINE_MODE_LEGACY_32, ZYDIS_ADDRESS_WIDTH_32 );
-    ZydisDecoderInit( &decoder_x86_64_intel, ZYDIS_MACHINE_MODE_LONG_64,   ZYDIS_ADDRESS_WIDTH_64 );
-    ZydisDecoderInit( &decoder_x86_64_amd,   ZYDIS_MACHINE_MODE_LONG_64,   ZYDIS_ADDRESS_WIDTH_64 );
+    ZydisDecoderInit( &decoder_x86_16,       ZYDIS_MACHINE_MODE_LEGACY_16, ZYDIS_STACK_WIDTH_16 );
+    ZydisDecoderInit( &decoder_x86_32,       ZYDIS_MACHINE_MODE_LEGACY_32, ZYDIS_STACK_WIDTH_32 );
+    ZydisDecoderInit( &decoder_x86_64_intel, ZYDIS_MACHINE_MODE_LONG_64,   ZYDIS_STACK_WIDTH_64 );
+    ZydisDecoderInit( &decoder_x86_64_amd,   ZYDIS_MACHINE_MODE_LONG_64,   ZYDIS_STACK_WIDTH_64 );
 
-    ZydisDecoderEnableMode( &decoder_x86_16,       ZYDIS_DECODER_MODE_KNC, true );
-    ZydisDecoderEnableMode( &decoder_x86_32,       ZYDIS_DECODER_MODE_KNC, true );
     ZydisDecoderEnableMode( &decoder_x86_64_intel, ZYDIS_DECODER_MODE_KNC, true );
     ZydisDecoderEnableMode( &decoder_x86_64_amd,   ZYDIS_DECODER_MODE_KNC, true );
-
-    ZydisDecoderEnableMode( &decoder_x86_64_amd, ZYDIS_DECODER_MODE_AMD_BRANCHES, true );
+    ZydisDecoderEnableMode( &decoder_x86_64_amd,   ZYDIS_DECODER_MODE_AMD_BRANCHES, true );
 
 
     // ---------------------------------------
@@ -283,11 +289,15 @@ int main( int argc, char *argv[] ) {
         generate_rand_instr( buf, bits==64 );
         
         ZydisDecodedInstruction instr1;
-        wrapped_ZydisDecoderDecodeBuffer(
+        ZydisDecodedOperand operands1[ZYDIS_MAX_OPERAND_COUNT_VISIBLE];
+        wrapped_ZydisDecoderDecodeFull(
             decoder_to_use,
             buf,
             64,
-            &instr1 );
+            &instr1,
+            operands1,
+            ZYDIS_MAX_OPERAND_COUNT_VISIBLE,
+            ZYDIS_DFLAG_VISIBLE_OPERANDS_ONLY );
         
         // Print breadcrumbs for passed tests - one crumb per 1 million
         // tests passed, additional daya per 10 million tests.
